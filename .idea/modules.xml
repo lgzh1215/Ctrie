@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/Ctrie.iml" filepath="$PROJECT_DIR$/.idea/modules/Ctrie.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/Ctrie_main.iml" filepath="$PROJECT_DIR$/.idea/modules/Ctrie_main.iml" group="Ctrie" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/Ctrie_test.iml" filepath="$PROJECT_DIR$/.idea/modules/Ctrie_test.iml" group="Ctrie" />
+    </modules>
+  </component>
+</project>
