@@ -1,10 +1,9 @@
 package org.lpj.some.collection
 
-import java.util.*
+import java.util.AbstractSet
 import java.util.concurrent.ConcurrentMap
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater
-import kotlin.NoSuchElementException
 
 typealias Gen = Any
 typealias Iterator<T> = MutableIterator<T>
@@ -34,14 +33,22 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         internal val KEY_ABSENT = Any()
         internal val KEY_PRESENT = Any()
 
-        internal fun hash(k: Any?): Int {
-            var h = k?.hashCode() ?: return 0
+        internal val Any?.hash: Int get() {
+            var h = this?.hashCode() ?: return 0
             h = h xor ((h ushr 20) xor (h ushr 12))
             h = h xor ((h ushr 7) xor (h ushr 4))
             return h
         }
 
-        internal fun equal(k1: Any?, k2: Any?): Boolean = k1 == k2
+        internal fun Any?.equal(that: Any?) = this == that
+
+        fun <K, V> mapOf(vararg kvPairs: kotlin.Pair<K, V>): TrieMap<K, V> {
+            val ct = TrieMap<K, V>()
+            for ((k, v) in kvPairs) {
+                ct.insert(k, v, k.hash)
+            }
+            return ct
+        }
     }
 
     private abstract class Branch
@@ -500,7 +507,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                         }
                     } else if (sub is SNode<*, *>) {
                         val sn = sub as SNode<K, V>
-                        if (sn.hc == hc && equal(sn.key, k))
+                        if (sn.hc == hc && sn.key.equal(k))
                             return sn.value
                         else
                             return null
@@ -546,7 +553,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                             val sn = cnAtPos as SNode<K, V>
                             when (cond) {
                                 null -> {
-                                    if (sn.hc == hc && equal(sn.key, k)) {
+                                    if (sn.hc == hc && sn.key.equal(k)) {
                                         if (GCAS(cn, cn.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap))
                                             return sn.value
                                         else
@@ -561,7 +568,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                                     }
                                 }
                                 KEY_ABSENT -> {
-                                    if (sn.hc == hc && equal(sn.key, k))
+                                    if (sn.hc == hc && sn.key.equal(k))
                                         return sn.value
                                     else {
                                         val rn = if (cn.gen == gen) cn else cn.renewed(gen, this@TrieMap)
@@ -573,7 +580,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                                     }
                                 }
                                 KEY_PRESENT -> {
-                                    if (sn.hc == hc && equal(sn.key, k)) {
+                                    if (sn.hc == hc && sn.key.equal(k)) {
                                         if (GCAS(cn, cn.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap))
                                             return sn.value
                                         else
@@ -582,7 +589,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                                         return null
                                 }
                                 else -> {
-                                    if (sn.hc == hc && equal(sn.key, k) && sn.value === cond) {
+                                    if (sn.hc == hc && sn.key.equal(k) && sn.value === cond) {
                                         if (GCAS(cn, cn.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap))
                                             return sn.value
                                         else
@@ -685,7 +692,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                         }
                         is SNode<*, *> -> {
                             val sn = sub as SNode<K, V>
-                            if (sn.hc == hc && equal(sn.key, k) && (v == null || v == sn.value)) {
+                            if (sn.hc == hc && sn.key.equal(k) && (v == null || v == sn.value)) {
                                 val ncn = cn.removedAt(pos, flag, gen).toContracted(lev)
                                 if (GCAS(cn, ncn, this@TrieMap))
                                     sn.value
@@ -734,7 +741,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         return if (res !== RESTART) res as V? else lookup(key, hash)
     }
 
-    internal tailrec fun insert(key: K, value: V, hash: Int, cond: Any?): V? {
+    internal tailrec fun insert(key: K, value: V, hash: Int, cond: Any? = null): V? {
         val root = RDCSS_READ_ROOT()
         val ret = root.rec_insert(key, value, hash, cond, 0, null, root.gen)
         return if (ret !== RESTART) ret as V? else insert(key, value, hash, cond)
@@ -757,36 +764,36 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         return if (RDCSS_ROOT(root, root.GCAS_READ(this), INode.newRootNode<K, V>())) Unit else clear()
     }
 
-    override operator fun get(key: K): V? = lookup(key, hash(key))
+    override operator fun get(key: K): V? = lookup(key, key.hash)
 
     override fun put(key: K, value: V): V? {
         ensureReadWrite()
-        return insert(key, value, hash(key), null)
+        return insert(key, value, key.hash, null)
     }
 
     override fun putIfAbsent(key: K, value: V): V? {
         ensureReadWrite()
-        return insert(key, value, hash(key), KEY_ABSENT)
+        return insert(key, value, key.hash, KEY_ABSENT)
     }
 
-    override fun replace(k: K, v: V): V? {
+    override fun replace(key: K, value: V): V? {
         ensureReadWrite()
-        return insert(k, v, hash(k), KEY_PRESENT)
+        return insert(key, value, key.hash, KEY_PRESENT)
     }
 
     override fun replace(key: K, oldValue: V, newValue: V): Boolean {
         ensureReadWrite()
-        return insert(key, newValue, hash(key), oldValue) != null
+        return insert(key, newValue, key.hash, oldValue) != null
     }
 
     override fun remove(key: K): V? {
         ensureReadWrite()
-        return delete(key, null, hash(key))
+        return delete(key, null, key.hash)
     }
 
     override fun remove(key: K, value: V): Boolean {
         ensureReadWrite()
-        return delete(key, value, hash(key)) != null
+        return delete(key, value, key.hash) != null
     }
 
     override fun containsKey(key: K): Boolean = get(key) != null
@@ -933,15 +940,14 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
     }
 
     private inner class EntrySet : AbstractSet<Entry<K, V>>() {
-        override val size: Int get() = count()
+        override val size: Int get() = this@TrieMap.size
 
         override fun iterator(): Iterator<Entry<K, V>> = this@TrieMap.iterator()
 
-        override fun contains(element: Entry<K, V>) = if (element !is Entry<*, *>) false else get(element.key) != null
+        override fun contains(element: Entry<K, V>) = if (element !is Entry<*, *>) false else this@TrieMap[element.key] != null
 
         override fun remove(element: Entry<K, V>) = if (element !is Entry<*, *>) false else this@TrieMap.remove(element.key) != null
 
         override fun clear() = this@TrieMap.clear()
     }
-
 }
