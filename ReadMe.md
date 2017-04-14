@@ -29,7 +29,7 @@ dependencies {
 
 ### Then you can do things with `TrieMap` and `TrieSet`
 ```kotlin
-import org.lpj.some.collection.TrieMap
+import org.lpj.some.collection.*
 
 fun doSomething() {
     val map: Map<String, String> = TrieMap()
