@@ -8,6 +8,8 @@ Ctrie is a concurrent thread-safe lock-free hash array mapped trie.
 This is a Kotlin implementation of Ctrie, supports non-blocking, atomic constant-time snapshot
 operation.
 
+Provide
+
 For details, see: http://lampwww.epfl.ch/~prokopec/ctries-snapshot.pdf
 
 # Usage
@@ -23,16 +25,19 @@ repositories {
 ```groovy
 dependencies {
     ...
-    compile 'com.github.lgzh1215:Ctrie:1.0'
+    compile 'com.github.lgzh1215:Ctrie:1.1'
 }
 ```
 
-### Then you can do things with `TrieMap`
+### Then you can do things with `TrieMap` and `TrieSet`
 ```kotlin
-import import org.lpj.some.collection.TrieMap
+import org.lpj.some.collection.TrieMap
 
-...
-val map: Map<String, String> = TrieMap()
-map.put("Too young", "Too simple")
-...
+fun doSomething() {
+    val map: Map<String, String> = TrieMap()
+    map.put("too young", "too simple")
+    
+    val set: Set<String> = TrieSet()
+    set.add("naive")
+}
 ```

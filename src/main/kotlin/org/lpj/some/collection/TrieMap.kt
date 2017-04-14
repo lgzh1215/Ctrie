@@ -1,13 +1,8 @@
 package org.lpj.some.collection
 
-import java.util.AbstractSet
 import java.util.concurrent.ConcurrentMap
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater
-
-typealias Gen = Any
-typealias Iterator<T> = MutableIterator<T>
-typealias Entry<K, V> = MutableMap.MutableEntry<K, V>
 
 @Suppress("UNCHECKED_CAST", "unused")
 class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
@@ -28,51 +23,15 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
 
     companion object {
         private val ROOT_UPDATER = AtomicReferenceFieldUpdater.newUpdater(TrieMap::class.java, Any::class.java, "root")
-
-        internal val RESTART = Any()
-        internal val KEY_ABSENT = Any()
-        internal val KEY_PRESENT = Any()
-
-        internal val Any?.hash: Int get() {
-            var h = this?.hashCode() ?: return 0
-            h = h xor ((h ushr 20) xor (h ushr 12))
-            h = h xor ((h ushr 7) xor (h ushr 4))
-            return h
-        }
-
-        internal fun Any?.equal(that: Any?) = this == that
-
-        fun <K, V> mapOf(vararg kvPairs: kotlin.Pair<K, V>): TrieMap<K, V> {
-            val ct = TrieMap<K, V>()
-            for ((k, v) in kvPairs) {
-                ct.insert(k, v, k.hash)
-            }
-            return ct
-        }
     }
 
-    private abstract class Branch
-
-    private abstract class MainNode<K, V> {
-        @Volatile
-        var prev: MainNode<K, V>? = null
-
-        abstract fun cachedSize(ct: Any): Int
-
-        fun CAS_PREV(oldValue: MainNode<K, V>, newValue: MainNode<K, V>?) = updater.compareAndSet(this, oldValue, newValue)
-
-        fun WRITE_PREV(newValue: MainNode<K, V>) = updater.set(this, newValue)
-
-        companion object {
-            private val updater = AtomicReferenceFieldUpdater.newUpdater(MainNode::class.java, MainNode::class.java, "prev")
-        }
+    private interface Leaf<K, V> : Entry<K, V> {
+        override fun setValue(newValue: V): Nothing = throw UnsupportedOperationException()
     }
 
-    private interface Pair<K, V> : Entry<K, V> {
-        override fun setValue(newValue: V): V = throw UnsupportedOperationException()
-    }
+    private abstract class Branch<K, V>
 
-    private class INode<K, V>(val gen: Gen) : Branch() {
+    private class INode<K, V>(val gen: Gen) : Branch<K, V>() {
         @Volatile lateinit
         var mainNode: MainNode<K, V>
 
@@ -86,8 +45,8 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
 
         fun GCAS_READ(ct: TrieMap<K, V>): MainNode<K, V> {
             val m = mainNode
-            val prevValue = m.prev
-            return if (prevValue == null) m else GCAS_Commit(m, ct)
+            val prev = m.prev
+            return if (prev == null) m else GCAS_Commit(m, ct)
         }
 
         tailrec fun GCAS_Commit(m: MainNode<K, V>, ct: TrieMap<K, V>): MainNode<K, V> {
@@ -95,24 +54,16 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
             val prev = m.prev ?: return m
 
             when (prev) {
-                is FailedNode<*, *> -> {
-                    val fn = prev as FailedNode<K, V>
-                    if (CAS_MainNode(m, fn.p))
-                        return fn.p
-                    else {
+                is FailedNode -> {
+                    return if (CAS_MainNode(m, prev.p)) prev.p else GCAS_Commit(mainNode, ct)
+                }
+                is MainNode -> {
+                    if (ctr.gen == gen && !ct.readOnly) {
+                        return if (m.CAS_PREV(prev, null)) m else GCAS_Commit(m, ct)
+                    } else {
+                        m.CAS_PREV(prev, FailedNode(prev))
                         return GCAS_Commit(mainNode, ct)
                     }
-                }
-                is MainNode<*, *> -> if (ctr.gen == gen && !ct.readOnly) {
-                    // try to commit
-                    if (m.CAS_PREV(prev, null))
-                        return m
-                    else {
-                        return GCAS_Commit(m, ct)
-                    }
-                } else {
-                    m.CAS_PREV(prev, FailedNode(prev))
-                    return GCAS_Commit(mainNode, ct)
                 }
                 else -> throw RuntimeException("Should not happen")
             }
@@ -123,7 +74,9 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
             if (CAS_MainNode(old, n)) {
                 GCAS_Commit(n, ct)
                 return n.prev == null
-            } else return false
+            } else {
+                return false
+            }
         }
 
         fun iNode(cn: MainNode<K, V>): INode<K, V> {
@@ -146,15 +99,34 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         companion object {
             private val updater = AtomicReferenceFieldUpdater.newUpdater(INode::class.java, MainNode::class.java, "mainNode")
 
-            fun <K, V> newRootNode(): INode<K, V> {
+            internal fun <K, V> newRootNode(): INode<K, V> {
                 val gen = Gen()
-                val cn = CNode<K, V>(0, arrayOf<Branch?>(), gen)
+                val cn = CNode(0, arrayOf<Branch<K, V>?>(), gen)
                 return INode(cn, gen)
             }
         }
     }
 
-    private class CNode<K, V>(val bitmap: Int, val array: Array<Branch?>, val gen: Gen) : MainNode<K, V>() {
+    private class SNode<K, V>(override val key: K, override val value: V, val hc: Int) : Branch<K, V>(), Leaf<K, V> {
+        fun copyTombed(): TNode<K, V> = TNode(key, value, hc)
+    }
+
+    private abstract class MainNode<K, V> {
+        @Volatile
+        var prev: MainNode<K, V>? = null
+
+        abstract fun cachedSize(ct: Any): Int
+
+        fun CAS_PREV(oldValue: MainNode<K, V>, newValue: MainNode<K, V>?) = updater.compareAndSet(this, oldValue, newValue)
+
+        fun WRITE_PREV(newValue: MainNode<K, V>) = updater.set(this, newValue)
+
+        companion object {
+            private val updater = AtomicReferenceFieldUpdater.newUpdater(MainNode::class.java, MainNode::class.java, "prev")
+        }
+    }
+
+    private class CNode<K, V>(val bitmap: Int, val array: Array<Branch<K, V>?>, val gen: Gen) : MainNode<K, V>() {
         @Volatile var size = -1
 
         override fun cachedSize(ct: Any): Int {
@@ -177,28 +149,28 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
             while (i < array.size) {
                 val pos = (i + offset) % array.size
                 val elem = array[pos]
-                if (elem is SNode<*, *>)
+                if (elem is SNode)
                     sz += 1
-                else if (elem is INode<*, *>)
-                    sz += (elem as INode<K, V>).cachedSize(ct)
+                else if (elem is INode)
+                    sz += elem.cachedSize(ct)
                 i += 1
             }
             return sz
         }
 
-        fun insertedAt(pos: Int, flag: Int, nn: Branch, gen: Gen): CNode<K, V> {
+        fun insertedAt(pos: Int, flag: Int, nn: Branch<K, V>, gen: Gen): CNode<K, V> {
             val len = array.size
             val bmp = bitmap
-            val narr = arrayOfNulls<Branch>(len + 1)
+            val narr = arrayOfNulls<Branch<K, V>>(len + 1)
             System.arraycopy(array, 0, narr, 0, pos)
             narr[pos] = nn
             System.arraycopy(array, pos, narr, pos + 1, len - pos)
             return CNode(bmp or flag, narr, gen)
         }
 
-        fun updatedAt(pos: Int, nn: Branch, gen: Gen): CNode<K, V> {
+        fun updatedAt(pos: Int, nn: Branch<K, V>, gen: Gen): CNode<K, V> {
             val len = array.size
-            val narr = arrayOfNulls<Branch>(len)
+            val narr = arrayOfNulls<Branch<K, V>>(len)
             System.arraycopy(array, 0, narr, 0, len)
             narr[pos] = nn
             return CNode(bitmap, narr, gen)
@@ -207,7 +179,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         fun removedAt(pos: Int, flag: Int, gen: Gen): CNode<K, V> {
             val arr = array
             val len = arr.size
-            val narr = arrayOfNulls<Branch>(len - 1)
+            val narr = arrayOfNulls<Branch<K, V>>(len - 1)
             System.arraycopy(arr, 0, narr, 0, pos)
             System.arraycopy(arr, pos + 1, narr, pos, len - pos - 1)
             return CNode(bitmap xor flag, narr, gen)
@@ -217,20 +189,20 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
             var i = 0
             val arr = array
             val len = arr.size
-            val newArray = arrayOfNulls<Branch>(len)
+            val newArray = arrayOfNulls<Branch<K, V>>(len)
             while (i < len) {
                 val elem = arr[i]
-                if (elem is INode<*, *>) {
-                    val `in` = elem as INode<K, V>
+                if (elem is INode) {
+                    val `in` = elem
                     newArray[i] = `in`.copyToGen(newGen, ct)
-                } else if (elem is Branch)
+                } else if (elem is Branch<K, V>)
                     newArray[i] = elem
                 i += 1
             }
             return CNode(bitmap, newArray, newGen)
         }
 
-        fun resurrect(iNode: INode<K, V>, iNodeMain: Any): Branch {
+        fun resurrect(iNode: INode<K, V>, iNodeMain: Any): Branch<K, V> {
             if (iNodeMain is TNode<*, *>) {
                 val tn = iNodeMain as TNode<K, V>
                 return tn.copyUntombed()
@@ -238,7 +210,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         }
 
         fun toContracted(lev: Int): MainNode<K, V> = if (array.size == 1 && lev > 0) {
-            if (array[0] is SNode<*, *>) {
+            if (array[0] is SNode) {
                 val sn = array[0] as SNode<K, V>
                 sn.copyTombed()
             } else this
@@ -247,20 +219,20 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         fun toCompressed(ct: TrieMap<K, V>, lev: Int, gen: Gen): MainNode<K, V> {
             val bmp = bitmap
             val arr = array
-            val tempArray = arrayOfNulls<Branch>(arr.size)
+            val tempArray = arrayOfNulls<Branch<K, V>>(arr.size)
             for (i in arr.indices) { // construct new bitmap
                 val sub = arr[i]
                 when (sub) {
-                    is INode<*, *> -> {
-                        val `in` = sub as INode<K, V>
+                    is INode -> {
+                        val `in` = sub
                         val iNodeMain = `in`.GCAS_READ(ct)
                         tempArray[i] = resurrect(`in`, iNodeMain)
                     }
-                    is SNode<*, *> -> tempArray[i] = sub
+                    is SNode -> tempArray[i] = sub
                 }
             }
 
-            return CNode<K, V>(bmp, tempArray, gen).toContracted(lev)
+            return CNode(bmp, tempArray, gen).toContracted(lev)
         }
 
         fun CAS_SIZE(oldValue: Int, newValue: Int) = updater.compareAndSet(this, oldValue, newValue)
@@ -277,12 +249,12 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                     if (xIndex == yIndex) {
                         val subINode = INode<K, V>(gen)
                         subINode.mainNode = dual(x, xhc, y, yhc, lev + 5, gen)
-                        CNode(bmp, arrayOf<Branch?>(subINode), gen)
+                        CNode(bmp, arrayOf<Branch<K, V>?>(subINode), gen)
                     } else {
                         if (xIndex < yIndex)
-                            CNode(bmp, arrayOf<Branch?>(x, y), gen)
+                            CNode(bmp, arrayOf<Branch<K, V>?>(x, y), gen)
                         else
-                            CNode(bmp, arrayOf<Branch?>(y, x), gen)
+                            CNode(bmp, arrayOf<Branch<K, V>?>(y, x), gen)
                     }
                 } else {
                     LNode(x.key, x.value, xhc, LNode(y.key, y.value, yhc))
@@ -291,15 +263,15 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         }
     }
 
-    private class LNode<K, V>(override val key: K, override val value: V, val hash: Int, var next: LNode<K, V>? = null) : MainNode<K, V>(), Pair<K, V> {
+    private class LNode<K, V>(override val key: K, override val value: V, val hash: Int, var next: LNode<K, V>? = null) : MainNode<K, V>(), Leaf<K, V> {
 
         override fun cachedSize(ct: Any): Int = size()
 
         operator fun get(key: K): V? = if (this.key == key) value else next?.get(key)
 
-        fun add(key: K, value: V, hash: Int): LNode<K, V> = LNode(key, value, hash, remove(key))
+        private fun add(key: K, value: V, hash: Int): LNode<K, V> = LNode(key, value, hash, remove(key))
 
-        fun remove(key: K): LNode<K, V>? = if (!contains(key)) this else {
+        private fun remove(key: K): LNode<K, V>? = if (!contains(key)) this else {
             if (this.key == key) this.next else {
                 val newNode = LNode(this.key, this.value, hash, null)
                 var current: LNode<K, V>? = this.next
@@ -347,9 +319,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         class NodeIterator<K, V>(var n: LNode<K, V>?) : Iterator<Entry<K, V>> {
             override fun remove() = throw UnsupportedOperationException()
 
-            override fun hasNext(): Boolean {
-                return n != null
-            }
+            override fun hasNext() = n != null
 
             override fun next(): Entry<K, V> {
                 val temp: LNode<K, V>? = n
@@ -361,11 +331,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         }
     }
 
-    private class SNode<K, V>(override val key: K, override val value: V, val hc: Int) : Branch(), Pair<K, V> {
-        fun copyTombed(): TNode<K, V> = TNode(key, value, hc)
-    }
-
-    private class TNode<K, V>(override val key: K, override val value: V, val hc: Int) : MainNode<K, V>(), Pair<K, V> {
+    private class TNode<K, V>(override val key: K, override val value: V, val hc: Int) : MainNode<K, V>(), Leaf<K, V> {
         fun copyUntombed(): SNode<K, V> = SNode(key, value, hc)
 
         override fun cachedSize(ct: Any): Int = 1
@@ -448,8 +414,8 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
 
     private fun INode<K, V>.clean(nd: INode<K, V>, lev: Int) {
         val m = nd.GCAS_READ(this@TrieMap)
-        if (m is CNode<*, *>) {
-            val cn = m as CNode<K, V>
+        if (m is CNode) {
+            val cn = m
             nd.GCAS(cn, cn.toCompressed(this@TrieMap, lev, gen), this@TrieMap)
         }
     }
@@ -457,25 +423,19 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
     private tailrec fun INode<K, V>.cleanParent(nonLive: Any, parent: INode<K, V>, hc: Int, lev: Int, startgen: Gen) {
         val pm = parent.GCAS_READ(this@TrieMap)
 
-        if (pm is CNode<*, *>) {
-            val cn = pm as CNode<K, V>
+        if (pm is CNode) {
+            val cn = pm
             val idx = hc.ushr(lev - 5) and 0x1f
             val bmp = cn.bitmap
             val flag = 1 shl idx
-            if (bmp and flag == 0) {
-            } else {
+            if (bmp and flag != 0) {
                 val pos = Integer.bitCount(bmp and flag - 1)
                 val sub = cn.array[pos]
-                if (sub === this) {
-                    if (nonLive is TNode<*, *>) {
-                        val tn = nonLive as TNode<K, V>
-                        val ncn = cn.updatedAt(pos, tn.copyUntombed(), gen).toContracted(lev - 5)
-                        if (!parent.GCAS(cn, ncn, this@TrieMap)) {
-                            if (this@TrieMap.RDCSS_READ_ROOT(false).gen == startgen) {
-                                cleanParent(nonLive, parent, hc, lev, startgen)
-                            }
-                        }
-                    }
+                if (sub === this && nonLive is TNode<*, *>) {
+                    val tn = nonLive as TNode<K, V>
+                    val ncn = cn.updatedAt(pos, tn.copyUntombed(), gen).toContracted(lev - 5)
+                    if (!parent.GCAS(cn, ncn, this@TrieMap) && this@TrieMap.RDCSS_READ_ROOT(false).gen == startgen)
+                        cleanParent(nonLive, parent, hc, lev, startgen)
                 }
             }
         }
@@ -485,40 +445,40 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         val m = GCAS_READ(this@TrieMap)
 
         when (m) {
-            is CNode<*, *> -> {
-                val cn = m as CNode<K, V>
+            is CNode -> {
                 val idx = hc ushr lev and 0b11111 // (hc >>> lev) & 0b11111
                 val flag = 1 shl idx              // 1 << idx
-                val bmp = cn.bitmap
+                val bmp = m.bitmap
                 if (bmp and flag == 0)
                     return null
                 else {
-                    val pos = if (bmp == 0xffffffff.toInt()) idx else Integer.bitCount(bmp and flag - 1)
-                    val sub = cn.array[pos]
-                    if (sub is INode<*, *>) {
-                        val `in` = sub as INode<K, V>
-                        if (this@TrieMap.readOnly || startGen == (sub as INode<Any, Any>).gen)
-                            return `in`.rec_lookup(k, hc, lev + 5, this, startGen)
-                        else {
-                            if (GCAS(cn, cn.renewed(startGen, this@TrieMap), this@TrieMap)) {
-                                return rec_lookup(k, hc, lev, parent, startGen)
-                            } else
-                                return RESTART
+                    val pos = if (bmp == -1) idx else Integer.bitCount(bmp and flag - 1)
+                    val sub = m.array[pos]
+                    when (sub) {
+                        is INode -> {
+                            if (this@TrieMap.readOnly || startGen == sub.gen)
+                                return sub.rec_lookup(k, hc, lev + 5, this, startGen)
+                            else {
+                                if (GCAS(m, m.renewed(startGen, this@TrieMap), this@TrieMap))
+                                    return rec_lookup(k, hc, lev, parent, startGen)
+                                else
+                                    return RESTART
+                            }
                         }
-                    } else if (sub is SNode<*, *>) {
-                        val sn = sub as SNode<K, V>
-                        if (sn.hc == hc && sn.key.equal(k))
-                            return sn.value
-                        else
-                            return null
+                        is SNode -> {
+                            if (sub.hc == hc && sub.key.equal(k))
+                                return sub.value
+                            else
+                                return null
+                        }
                     }
                 }
             }
-            is TNode<*, *> -> {
-                return cleanReadOnly(m as TNode<K, V>, lev, parent!!, k, hc)
+            is TNode -> {
+                return cleanReadOnly(m, lev, parent!!, k, hc)
             }
-            is LNode<*, *> -> {
-                return (m as LNode<K, V>)[k]
+            is LNode -> {
+                return m[k]
             }
         }
         throw RuntimeException("Should not happen")
@@ -528,40 +488,39 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         val m = GCAS_READ(this@TrieMap)
 
         when (m) {
-            is CNode<*, *> -> {
-                val cn = m as CNode<K, V>
+            is CNode -> {
                 val idx = hc ushr lev and 0b11111 // (hc >>> lev) & 0b11111
                 val flag = 1 shl idx              // 1 << idx
-                val bmp = cn.bitmap
+                val bmp = m.bitmap
                 val mask = flag - 1
                 val pos = Integer.bitCount(bmp and mask)
                 if (bmp and flag != 0) {
-                    val cnAtPos = cn.array[pos]
+                    val cnAtPos = m.array[pos]
                     when (cnAtPos) {
-                        is INode<*, *> -> {
-                            val `in` = cnAtPos as INode<K, V>
+                        is INode -> {
+                            val `in` = cnAtPos
                             if (startgen == `in`.gen)
                                 return `in`.rec_insert(k, v, hc, cond, lev + 5, this, startgen)
                             else {
-                                if (GCAS(cn, cn.renewed(startgen, this@TrieMap), this@TrieMap))
+                                if (GCAS(m, m.renewed(startgen, this@TrieMap), this@TrieMap))
                                     return rec_insert(k, v, hc, cond, lev, parent, startgen)
                                 else
                                     return RESTART
                             }
                         }
-                        is SNode<*, *> -> {
-                            val sn = cnAtPos as SNode<K, V>
+                        is SNode -> {
+                            val sn = cnAtPos
                             when (cond) {
                                 null -> {
                                     if (sn.hc == hc && sn.key.equal(k)) {
-                                        if (GCAS(cn, cn.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap))
+                                        if (GCAS(m, m.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap))
                                             return sn.value
                                         else
                                             return RESTART
                                     } else {
-                                        val rn = if (cn.gen == gen) cn else cn.renewed(gen, this@TrieMap)
+                                        val rn = if (m.gen == gen) m else m.renewed(gen, this@TrieMap)
                                         val nn = rn.updatedAt(pos, iNode(CNode.dual(sn, sn.hc, SNode(k, v, hc), hc, lev + 5, gen)), gen)
-                                        if (GCAS(cn, nn, this@TrieMap))
+                                        if (GCAS(m, nn, this@TrieMap))
                                             return null // None;
                                         else
                                             return RESTART
@@ -571,9 +530,9 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                                     if (sn.hc == hc && sn.key.equal(k))
                                         return sn.value
                                     else {
-                                        val rn = if (cn.gen == gen) cn else cn.renewed(gen, this@TrieMap)
+                                        val rn = if (m.gen == gen) m else m.renewed(gen, this@TrieMap)
                                         val nn = rn.updatedAt(pos, iNode(CNode.dual(sn, sn.hc, SNode(k, v, hc), hc, lev + 5, gen)), gen)
-                                        if (GCAS(cn, nn, this@TrieMap))
+                                        if (GCAS(m, nn, this@TrieMap))
                                             return null // None
                                         else
                                             return RESTART
@@ -581,7 +540,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                                 }
                                 KEY_PRESENT -> {
                                     if (sn.hc == hc && sn.key.equal(k)) {
-                                        if (GCAS(cn, cn.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap))
+                                        if (GCAS(m, m.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap))
                                             return sn.value
                                         else
                                             return RESTART
@@ -590,7 +549,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                                 }
                                 else -> {
                                     if (sn.hc == hc && sn.key.equal(k) && sn.value === cond) {
-                                        if (GCAS(cn, cn.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap))
+                                        if (GCAS(m, m.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap))
                                             return sn.value
                                         else
                                             return RESTART
@@ -601,22 +560,22 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                         }
                     }
                 } else if (cond == null || cond === KEY_ABSENT) {
-                    val rn = if (cn.gen == gen) cn else cn.renewed(gen, this@TrieMap)
+                    val rn = if (m.gen == gen) m else m.renewed(gen, this@TrieMap)
                     val ncnode = rn.insertedAt(pos, flag, SNode(k, v, hc), gen)
-                    if (GCAS(cn, ncnode, this@TrieMap))
+                    if (GCAS(m, ncnode, this@TrieMap))
                         return null
                     else
                         return RESTART
-                } else
+                } else {
                     return null
+                }
             }
-            is TNode<*, *> -> {
+            is TNode -> {
                 clean(parent!!, lev - 5)
                 return RESTART
             }
-            is LNode<*, *> -> {
-                // 3) an l-node
-                val ln = m as LNode<K, V>
+            is LNode -> {
+                val ln = m
                 when (cond) {
                     null -> {
                         val value = ln[k]
@@ -667,8 +626,8 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         val m = GCAS_READ(this@TrieMap)
 
         when (m) {
-            is CNode<*, *> -> {
-                val cn = m as CNode<K, V>
+            is CNode -> {
+                val cn = m
                 val idx = hc.ushr(lev) and 0x1f
                 val bmp = cn.bitmap
                 val flag = 1 shl idx
@@ -678,8 +637,8 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                     val pos = Integer.bitCount(bmp and flag - 1)
                     val sub = cn.array[pos]
                     val res: Any? = when (sub) {
-                        is INode<*, *> -> {
-                            val `in` = sub as INode<K, V>
+                        is INode -> {
+                            val `in` = sub
                             if (startgen == `in`.gen)
                                 `in`.rec_delete(k, v, hc, lev + 5, this, startgen)
                             else {
@@ -690,8 +649,8 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                             }
 
                         }
-                        is SNode<*, *> -> {
-                            val sn = sub as SNode<K, V>
+                        is SNode -> {
+                            val sn = sub
                             if (sn.hc == hc && sn.key.equal(k) && (v == null || v == sn.value)) {
                                 val ncn = cn.removedAt(pos, flag, gen).toContracted(lev)
                                 if (GCAS(cn, ncn, this@TrieMap))
@@ -708,18 +667,18 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                     else {
                         if (parent != null) { // never tomb at root
                             val n = GCAS_READ(this@TrieMap)
-                            if (n is TNode<*, *>) cleanParent(n, parent, hc, lev, startgen)
+                            if (n is TNode) cleanParent(n, parent, hc, lev, startgen)
                         }
                         return res
                     }
                 }
             }
-            is TNode<*, *> -> {
+            is TNode -> {
                 clean(parent!!, lev - 5)
                 return RESTART
             }
-            is LNode<*, *> -> {
-                val ln = m as LNode<K, V>
+            is LNode -> {
+                val ln = m
                 val value = ln[k]
                 if (v == null) {
                     val nn = ln.removed(k)
@@ -735,31 +694,29 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         throw RuntimeException("Should not happen")
     }
 
-    internal tailrec fun lookup(key: K, hash: Int): V? {
+    internal tailrec fun lookup(key: K, hash: Int = key.hash): V? {
         val root = RDCSS_READ_ROOT()
         val res = root.rec_lookup(key, hash, 0, null, root.gen)
         return if (res !== RESTART) res as V? else lookup(key, hash)
     }
 
-    internal tailrec fun insert(key: K, value: V, hash: Int, cond: Any? = null): V? {
+    internal tailrec fun insert(key: K, value: V, hash: Int = key.hash, cond: Any? = null): V? {
         val root = RDCSS_READ_ROOT()
         val ret = root.rec_insert(key, value, hash, cond, 0, null, root.gen)
         return if (ret !== RESTART) ret as V? else insert(key, value, hash, cond)
     }
 
-    internal tailrec fun delete(key: K, value: V?, hash: Int): V? {
+    internal tailrec fun delete(key: K, value: V? = null, hash: Int = key.hash): V? {
         val root = RDCSS_READ_ROOT()
         val res = root.rec_delete(key, value, hash, 0, null, root.gen)
         return if (res !== RESTART) res as V? else delete(key, value, hash)
     }
 
     private fun ensureReadWrite() {
-        if (readOnly) {
-            throw UnsupportedOperationException("Attempted to modify a read-only view")
-        }
+        if (readOnly) throw UnsupportedOperationException("Attempted to modify a read-only view")
     }
 
-    override tailrec fun clear() {
+    tailrec override fun clear() {
         val root = RDCSS_READ_ROOT()
         return if (RDCSS_ROOT(root, root.GCAS_READ(this), INode.newRootNode<K, V>())) Unit else clear()
     }
@@ -824,7 +781,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
     fun readOnlyIterator(): Iterator<Entry<K, V>> = if (!readOnly) readOnlySnapshot().readOnlyIterator() else TrieMapReadOnlyIterator(this)
 
     private open class TrieMapIterator<K, V>(val ct: TrieMap<K, V>) : Iterator<Entry<K, V>> {
-        private val stack = arrayOfNulls<Array<Branch?>>(7)
+        private val stack = arrayOfNulls<Array<Branch<K, V>?>>(7)
         private val stackPos = IntArray(7)
         private var depth = -1
         private var subIter: Iterator<Entry<K, V>>? = null
@@ -849,7 +806,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                 }
 
                 lastReturned = r
-                if (r is Entry<*, *>) {
+                if (r is Entry) {
                     return nextEntry(r)
                 }
                 return r
@@ -868,7 +825,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
             override fun setValue(newValue: V): V {
                 val value = this.value
                 updated = newValue
-                ct.put(key, newValue)
+                ct.insert(key, newValue)
                 return value
             }
         }
@@ -876,18 +833,18 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         private fun readINode(`in`: INode<K, V>) {
             val m = `in`.GCAS_READ(ct)
             when (m) {
-                is CNode<*, *> -> {
-                    val cn = m as CNode<K, V>
+                is CNode -> {
+                    val cn = m
                     depth += 1
                     stack[depth] = cn.array
                     stackPos[depth] = -1
                     advance()
                 }
-                is TNode<*, *> -> {
-                    current = m as TNode<K, V>
+                is TNode -> {
+                    current = m
                 }
-                is LNode<*, *> -> {
-                    subIter = (m as LNode<K, V>).iterator()
+                is LNode -> {
+                    subIter = m.iterator()
                     checkSubIter()
                 }
                 else -> current = null
@@ -908,8 +865,8 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
                     stackPos[depth] = nPos
                     val elem = stack[depth]!![nPos]
                     when (elem) {
-                        is SNode<*, *> -> current = elem as SNode<K, V>
-                        is INode<*, *> -> readINode(elem as INode<K, V>)
+                        is SNode -> current = elem
+                        is INode -> readINode(elem)
                     }
                 } else {
                     depth -= 1
@@ -923,7 +880,7 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         override fun remove() {
             val lastReturned = lastReturned
             if (lastReturned != null) {
-                ct.remove(lastReturned.key)
+                ct.delete(lastReturned.key)
                 this.lastReturned = null
             } else throw IllegalStateException()
         }
@@ -939,14 +896,14 @@ class TrieMap<K, V> : AbstractMutableMap<K, V>, ConcurrentMap<K, V> {
         override fun nextEntry(r: Entry<K, V>): Entry<K, V> = r
     }
 
-    private inner class EntrySet : AbstractSet<Entry<K, V>>() {
+    private inner class EntrySet : java.util.AbstractSet<Entry<K, V>>() {
         override val size: Int get() = this@TrieMap.size
 
         override fun iterator(): Iterator<Entry<K, V>> = this@TrieMap.iterator()
 
-        override fun contains(element: Entry<K, V>) = if (element !is Entry<*, *>) false else this@TrieMap[element.key] != null
+        override fun contains(element: Entry<K, V>) = if (element !is Entry) false else this@TrieMap.lookup(element.key) != null
 
-        override fun remove(element: Entry<K, V>) = if (element !is Entry<*, *>) false else this@TrieMap.remove(element.key) != null
+        override fun remove(element: Entry<K, V>) = if (element !is Entry) false else this@TrieMap.delete(element.key) != null
 
         override fun clear() = this@TrieMap.clear()
     }
