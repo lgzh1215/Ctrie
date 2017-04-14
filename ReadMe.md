@@ -8,8 +8,6 @@ Ctrie is a concurrent thread-safe lock-free hash array mapped trie.
 This is a Kotlin implementation of Ctrie, supports non-blocking, atomic constant-time snapshot
 operation.
 
-Provide
-
 For details, see: http://lampwww.epfl.ch/~prokopec/ctries-snapshot.pdf
 
 # Usage
