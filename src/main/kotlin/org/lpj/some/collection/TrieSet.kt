@@ -25,7 +25,7 @@ class TrieSet<E> : AbstractMutableSet<E> {
     }
 
     private interface Leaf<out E> {
-        val Eey: E
+        val key: E
     }
 
     private abstract class Branch<E>
@@ -106,8 +106,8 @@ class TrieSet<E> : AbstractMutableSet<E> {
         }
     }
 
-    private class SNode<E>(override val Eey: E, val hc: Int) : Branch<E>(), Leaf<E> {
-        fun copyTombed(): TNode<E> = TNode(Eey, hc)
+    private class SNode<E>(override val key: E, val hc: Int) : Branch<E>(), Leaf<E> {
+        fun copyTombed(): TNode<E> = TNode(key, hc)
     }
 
     private abstract class MainNode<E> {
@@ -256,28 +256,28 @@ class TrieSet<E> : AbstractMutableSet<E> {
                             CNode(bmp, arrayOf<Branch<E>?>(y, x), gen)
                     }
                 } else {
-                    LNode(x.Eey, xhc, LNode(y.Eey, yhc))
+                    LNode(x.key, xhc, LNode(y.key, yhc))
                 }
             }
         }
     }
 
-    private class LNode<E>(override val Eey: E, val hash: Int, var next: LNode<E>? = null) : MainNode<E>(), Leaf<E> {
+    private class LNode<E>(override val key: E, val hash: Int, var next: LNode<E>? = null) : MainNode<E>(), Leaf<E> {
 
         override fun cachedSize(ct: Any): Int = size()
 
-        operator fun get(Eey: E): E? = if (this.Eey == Eey) Eey else next?.get(Eey)
+        operator fun get(key: E): E? = if (this.key == key) key else next?.get(key)
 
-        private fun add(Eey: E, hash: Int): LNode<E> = LNode(Eey, hash, remove(Eey))
+        private fun add(key: E, hash: Int): LNode<E> = LNode(key, hash, remove(key))
 
-        private fun remove(Eey: E): LNode<E>? = if (!contains(Eey)) this else {
-            if (this.Eey == Eey) this.next else {
-                val newNode = LNode(this.Eey, hash, null)
+        private fun remove(key: E): LNode<E>? = if (!contains(key)) this else {
+            if (this.key == key) this.next else {
+                val newNode = LNode(this.key, hash, null)
                 var current: LNode<E>? = this.next
                 var lastNode = newNode
                 while (current != null) {
-                    if (Eey != current.Eey) {
-                        val temp = LNode(current.Eey, hash, null)
+                    if (key != current.key) {
+                        val temp = LNode(current.key, hash, null)
                         lastNode.next = temp
                         lastNode = temp
                     }
@@ -306,12 +306,12 @@ class TrieSet<E> : AbstractMutableSet<E> {
                     return updatedLNode
                 else {
                     // create it tombed so that it gets compressed on subsequent accesses
-                    return TNode(updatedLNode.Eey, updatedLNode.hash)
+                    return TNode(updatedLNode.key, updatedLNode.hash)
                 }
             } else throw Exception("Should not happen")
         }
 
-        operator fun contains(E: E): Boolean = if (E == this.Eey) true else next?.contains(E) ?: false
+        operator fun contains(E: E): Boolean = if (E == this.key) true else next?.contains(E) ?: false
 
         operator fun iterator() = NodeIterator(this)
 
@@ -324,14 +324,14 @@ class TrieSet<E> : AbstractMutableSet<E> {
                 val temp: LNode<E>? = n
                 if (temp != null) {
                     this.n = temp.next
-                    return temp.Eey
+                    return temp.key
                 } else throw NoSuchElementException()
             }
         }
     }
 
-    private class TNode<E>(override val Eey: E, val hc: Int) : MainNode<E>(), Leaf<E> {
-        fun copyUntombed(): SNode<E> = SNode(Eey, hc)
+    private class TNode<E>(override val key: E, val hc: Int) : MainNode<E>(), Leaf<E> {
+        fun copyUntombed(): SNode<E> = SNode(key, hc)
 
         override fun cachedSize(ct: Any): Int = 1
     }
@@ -407,7 +407,7 @@ class TrieSet<E> : AbstractMutableSet<E> {
             clean(parent, lev - 5)
             return RESTART
         } else {
-            return if (tn.hc == hc && tn.Eey === E) tn.Eey else null
+            return if (tn.hc == hc && tn.key === E) tn.key else null
         }
     }
 
@@ -440,7 +440,7 @@ class TrieSet<E> : AbstractMutableSet<E> {
         }
     }
 
-    private tailrec fun INode<E>.rec_looEup(E: E, hc: Int, lev: Int, parent: INode<E>?, startGen: Gen): Any? {
+    private tailrec fun INode<E>.rec_lookup(E: E, hc: Int, lev: Int, parent: INode<E>?, startGen: Gen): Any? {
         val m = GCAS_READ(this@TrieSet)
 
         when (m) {
@@ -456,17 +456,17 @@ class TrieSet<E> : AbstractMutableSet<E> {
                     when (sub) {
                         is INode -> {
                             if (this@TrieSet.readOnly || startGen == sub.gen)
-                                return sub.rec_looEup(E, hc, lev + 5, this, startGen)
+                                return sub.rec_lookup(E, hc, lev + 5, this, startGen)
                             else {
                                 if (GCAS(m, m.renewed(startGen, this@TrieSet), this@TrieSet))
-                                    return rec_looEup(E, hc, lev, parent, startGen)
+                                    return rec_lookup(E, hc, lev, parent, startGen)
                                 else
                                     return RESTART
                             }
                         }
                         is SNode -> {
-                            if (sub.hc == hc && sub.Eey.equal(E))
-                                return sub.Eey
+                            if (sub.hc == hc && sub.key.equal(E))
+                                return sub.key
                             else
                                 return null
                         }
@@ -483,7 +483,7 @@ class TrieSet<E> : AbstractMutableSet<E> {
         throw RuntimeException("Should not happen")
     }
 
-    private tailrec fun INode<E>.rec_insert(E: E, hc: Int, cond: Any?, lev: Int, parent: INode<E>?, startgen: Gen): Any? {
+    private tailrec fun INode<E>.rec_insert(E: E, hc: Int, lev: Int, parent: INode<E>?, startgen: Gen): Any? {
         val m = GCAS_READ(this@TrieSet)
 
         when (m) {
@@ -499,19 +499,19 @@ class TrieSet<E> : AbstractMutableSet<E> {
                         is INode -> {
                             val `in` = cnAtPos
                             if (startgen == `in`.gen)
-                                return `in`.rec_insert(E, hc, cond, lev + 5, this, startgen)
+                                return `in`.rec_insert(E, hc, lev + 5, this, startgen)
                             else {
                                 if (GCAS(m, m.renewed(startgen, this@TrieSet), this@TrieSet))
-                                    return rec_insert(E, hc, cond, lev, parent, startgen)
+                                    return rec_insert(E, hc, lev, parent, startgen)
                                 else
                                     return RESTART
                             }
                         }
                         is SNode -> {
                             val sn = cnAtPos
-                            if (sn.hc == hc && sn.Eey.equal(E)) {
+                            if (sn.hc == hc && sn.key.equal(E)) {
                                 if (GCAS(m, m.updatedAt(pos, SNode(E, hc), gen), this@TrieSet))
-                                    return sn.Eey
+                                    return sn.key
                                 else
                                     return RESTART
                             } else {
@@ -524,15 +524,13 @@ class TrieSet<E> : AbstractMutableSet<E> {
                             }
                         }
                     }
-                } else if (cond == null) {
+                } else {
                     val rn = if (m.gen == gen) m else m.renewed(gen, this@TrieSet)
                     val ncnode = rn.insertedAt(pos, flag, SNode(E, hc), gen)
                     if (GCAS(m, ncnode, this@TrieSet))
                         return null
                     else
                         return RESTART
-                } else {
-                    return null
                 }
             }
             is TNode -> {
@@ -580,10 +578,10 @@ class TrieSet<E> : AbstractMutableSet<E> {
                         }
                         is SNode -> {
                             val sn = sub
-                            if (sn.hc == hc && sn.Eey.equal(E)) {
+                            if (sn.hc == hc && sn.key.equal(E)) {
                                 val ncn = cn.removedAt(pos, flag, gen).toContracted(lev)
                                 if (GCAS(cn, ncn, this@TrieSet))
-                                    sn.Eey
+                                    sn.key
                                 else
                                     RESTART
                             } else null
@@ -616,22 +614,22 @@ class TrieSet<E> : AbstractMutableSet<E> {
         throw RuntimeException("Should not happen")
     }
 
-    internal tailrec fun looEup(Eey: E, hash: Int = Eey.hash): E? {
+    internal tailrec fun lookup(key: E, hash: Int = key.hash): E? {
         val root = RDCSS_READ_ROOT()
-        val res = root.rec_looEup(Eey, hash, 0, null, root.gen)
-        return if (res !== RESTART) res as E? else looEup(Eey, hash)
+        val res = root.rec_lookup(key, hash, 0, null, root.gen)
+        return if (res !== RESTART) res as E? else lookup(key, hash)
     }
 
-    internal tailrec fun insert(Eey: E, hash: Int = Eey.hash, cond: Any? = null): E? {
+    internal tailrec fun insert(key: E, hash: Int = key.hash): E? {
         val root = RDCSS_READ_ROOT()
-        val ret = root.rec_insert(Eey, hash, cond, 0, null, root.gen)
-        return if (ret !== RESTART) ret as E? else insert(Eey, hash, cond)
+        val ret = root.rec_insert(key, hash, 0, null, root.gen)
+        return if (ret !== RESTART) ret as E? else insert(key, hash)
     }
 
-    internal tailrec fun delete(Eey: E, hash: Int = Eey.hash): E? {
+    internal tailrec fun delete(key: E, hash: Int = key.hash): E? {
         val root = RDCSS_READ_ROOT()
-        val res = root.rec_delete(Eey, hash, 0, null, root.gen)
-        return if (res !== RESTART) res as E? else delete(Eey, hash)
+        val res = root.rec_delete(key, hash, 0, null, root.gen)
+        return if (res !== RESTART) res as E? else delete(key, hash)
     }
 
     private fun ensureReadWrite() {
@@ -644,7 +642,7 @@ class TrieSet<E> : AbstractMutableSet<E> {
         return if (RDCSS_ROOT(root, root.GCAS_READ(this), INode.newRootNode<E>())) Unit else clear()
     }
 
-    override fun contains(element: E): Boolean = looEup(element) != null
+    override fun contains(element: E): Boolean = lookup(element) != null
 
     override fun add(element: E): Boolean {
         ensureReadWrite()
@@ -700,7 +698,7 @@ class TrieSet<E> : AbstractMutableSet<E> {
                     r = subIter!!.next()
                     checESubIter()
                 } else {
-                    r = current!!.Eey
+                    r = current!!.key
                     advance()
                 }
 
