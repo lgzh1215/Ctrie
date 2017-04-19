@@ -23,7 +23,7 @@ repositories {
 ```groovy
 dependencies {
     ...
-    compile 'com.github.lgzh1215:Ctrie:1.1'
+    compile 'com.github.lgzh1215:Ctrie:1.2'
 }
 ```
 
