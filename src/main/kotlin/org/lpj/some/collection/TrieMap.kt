@@ -16,13 +16,7 @@ class TrieMap<K : Any, V : Any> private constructor(@Volatile private var root: 
     constructor() : this(INode.newRootNode<K, V>(), readOnly = false)
 
     companion object {
-        private val Any?.hash: Int
-            get() {
-                val h = this?.hashCode() ?: return 0
-                return (Integer.reverseBytes((h * 0x9e3775cd).toInt()) * 0x9e3775cd).toInt()
-            }
-
-        private fun Any?.equal(that: Any?) = this == that
+        private val Any.hash: Int get() = (Integer.reverseBytes((hashCode() * 0x9e3775cd).toInt()) * 0x9e3775cd).toInt()
 
         private val RESTART = Any()
         private val KEY_ABSENT = Any()
@@ -443,7 +437,7 @@ class TrieMap<K : Any, V : Any> private constructor(@Volatile private var root: 
                         }
                         is SNode -> {
                             val sNode = sub as SNode
-                            return if (sNode.hc == hc && sNode.key.equal(k))
+                            return if (sNode.hc == hc && sNode.key == k)
                                 sNode.value
                             else
                                 null
@@ -491,7 +485,7 @@ class TrieMap<K : Any, V : Any> private constructor(@Volatile private var root: 
                             val sn = cnAtPos as SNode
                             when {
                                 cond == null -> {
-                                    if (sn.hc == hc && sn.key.equal(k)) {
+                                    if (sn.hc == hc && sn.key == k) {
                                         return if (GCAS(cn, cn.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap)) sn.value else RESTART
                                     } else {
                                         val rn = if (cn.gen == gen) cn else cn.renewed(gen, this@TrieMap)
@@ -500,7 +494,7 @@ class TrieMap<K : Any, V : Any> private constructor(@Volatile private var root: 
                                     }
                                 }
                                 cond === KEY_ABSENT -> {
-                                    if (sn.hc == hc && sn.key.equal(k)) {
+                                    if (sn.hc == hc && sn.key == k) {
                                         return sn.value
                                     } else {
                                         val rn = if (cn.gen == gen) cn else cn.renewed(gen, this@TrieMap)
@@ -509,14 +503,14 @@ class TrieMap<K : Any, V : Any> private constructor(@Volatile private var root: 
                                     }
                                 }
                                 cond === KEY_PRESENT -> {
-                                    if (sn.hc == hc && sn.key.equal(k)) {
+                                    if (sn.hc == hc && sn.key == k) {
                                         return if (GCAS(cn, cn.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap)) sn.value else RESTART
                                     } else {
                                         return null
                                     }
                                 }
                                 else -> {
-                                    if (sn.hc == hc && sn.key.equal(k) && sn.value === cond) {
+                                    if (sn.hc == hc && sn.key == k && sn.value === cond) {
                                         return if (GCAS(cn, cn.updatedAt(pos, SNode(k, v, hc), gen), this@TrieMap)) sn.value else RESTART
                                     } else {
                                         return null
@@ -604,7 +598,7 @@ class TrieMap<K : Any, V : Any> private constructor(@Volatile private var root: 
                         }
                         is SNode -> {
                             val sNode = sub as SNode
-                            if (sNode.hc == hc && sNode.key.equal(k) && (v == null || v == sNode.value)) {
+                            if (sNode.hc == hc && sNode.key == k && (v == null || v == sNode.value)) {
                                 val ncn = cn.removedAt(pos, flag, gen).toContracted(lev)
                                 if (GCAS(cn, ncn, this@TrieMap))
                                     sNode.value
