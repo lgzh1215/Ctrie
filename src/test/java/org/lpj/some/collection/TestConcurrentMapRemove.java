@@ -1,5 +1,6 @@
 package org.lpj.some.collection;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.concurrent.ConcurrentMap;
@@ -12,13 +13,13 @@ public class TestConcurrentMapRemove {
         final ConcurrentMap<Object, Object> map = new TrieMap<>();
 
         for (int i = 128; i < COUNT; i++) {
-            TestHelper.assertFalse (map.remove (i, i));
-            TestHelper.assertTrue (null == map.put (i, i));
-            TestHelper.assertFalse (map.remove (i, "lol"));
-            TestHelper.assertTrue (map.containsKey (i));
-            TestHelper.assertTrue (map.remove (i, i));
-            TestHelper.assertFalse (map.containsKey (i));
-            TestHelper.assertTrue (null == map.put (i, i));
+            Assert.assertFalse (map.remove (i, i));
+            Assert.assertTrue (null == map.put (i, i));
+            Assert.assertFalse (map.remove (i, "lol"));
+            Assert.assertTrue (map.containsKey (i));
+            Assert.assertTrue (map.remove (i, i));
+            Assert.assertFalse (map.containsKey (i));
+            Assert.assertTrue (null == map.put (i, i));
         }
     }
 }

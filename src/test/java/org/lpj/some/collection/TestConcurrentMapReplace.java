@@ -1,5 +1,6 @@
 package org.lpj.some.collection;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.concurrent.ConcurrentMap;
@@ -12,12 +13,12 @@ public class TestConcurrentMapReplace {
         final ConcurrentMap<Object, Object> map = new TrieMap<Object, Object> ();
         
         for (int i = 0; i < COUNT; i++) {
-            TestHelper.assertTrue (null == map.replace (i, "lol"));
-            TestHelper.assertFalse (map.replace (i, i, "lol2"));
-            TestHelper.assertTrue (null == map.put (i, i));
-            TestHelper.assertTrue (Integer.valueOf (i).equals (map.replace (i, "lol")));
-            TestHelper.assertFalse (map.replace (i, i, "lol2"));
-            TestHelper.assertTrue (map.replace (i, "lol", i));
+            Assert.assertTrue (null == map.replace (i, "lol"));
+            Assert.assertFalse (map.replace (i, i, "lol2"));
+            Assert.assertTrue (null == map.put (i, i));
+            Assert.assertTrue (Integer.valueOf (i).equals (map.replace (i, "lol")));
+            Assert.assertFalse (map.replace (i, i, "lol2"));
+            Assert.assertTrue (map.replace (i, "lol", i));
         }
     }
 }

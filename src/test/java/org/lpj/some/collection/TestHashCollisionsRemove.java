@@ -1,5 +1,6 @@
 package org.lpj.some.collection;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.Map;
@@ -23,7 +24,7 @@ public class TestHashCollisionsRemove {
             }
         }
 
-        TestHelper.assertEquals (0, bt.size ());
-        TestHelper.assertTrue (bt.isEmpty ());
+        Assert.assertEquals (0, bt.size ());
+        Assert.assertTrue (bt.isEmpty ());
     }
 }

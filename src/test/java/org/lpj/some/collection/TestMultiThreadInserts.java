@@ -1,5 +1,6 @@
 package org.lpj.some.collection;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.concurrent.ExecutorService;
@@ -35,7 +36,7 @@ public class TestMultiThreadInserts {
         
         for (int j = 0; j < 500 * 1000; j++) {
             final Object lookup = bt.get(Integer.valueOf (j));
-            TestHelper.assertEquals (Integer.valueOf (j), lookup);
+            Assert.assertEquals (Integer.valueOf (j), lookup);
         }
     }
 }

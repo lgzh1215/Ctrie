@@ -1,5 +1,6 @@
 package org.lpj.some.collection;
 
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -20,8 +21,8 @@ public class TestReadOnlyAndUpdatableIterators {
     public void setUp() {
         bt = new TrieMap <Integer, Integer> ();
         for (int j = 0; j < MAP_SIZE; j++) {
-            TestHelper.assertEquals (null, bt.put (Integer.valueOf (j), Integer.valueOf (j)));
-        }                
+            Assert.assertEquals (null, bt.put (Integer.valueOf (j), Integer.valueOf (j)));
+        }
     }
     
     @Test
@@ -30,14 +31,14 @@ public class TestReadOnlyAndUpdatableIterators {
         try {
             it.next().setValue (0);
             // It should have generated an exception, because it is a read-only iterator
-            TestHelper.assertFalse (true);
+            Assert.assertFalse (true);
         } catch (Exception e) {
             
         }
         try {
             it.remove ();
             // It should have generated an exception, because it is a read-only iterator
-            TestHelper.assertFalse (true);
+            Assert.assertFalse (true);
         } catch (Exception e) {
             
         }
@@ -50,14 +51,14 @@ public class TestReadOnlyAndUpdatableIterators {
         try {
             it.next().setValue (0);
             // It should have generated an exception, because it is a read-only iterator
-            TestHelper.assertFalse (true);
+            Assert.assertFalse (true);
         } catch (Exception e) {
             
         }
         try {
             it.remove ();
             // It should have generated an exception, because it is a read-only iterator
-            TestHelper.assertFalse (true);
+            Assert.assertFalse (true);
         } catch (Exception e) {
             
         }
@@ -70,14 +71,14 @@ public class TestReadOnlyAndUpdatableIterators {
         try {
             it.next().setValue (0);
             // It should have generated an exception, because it is a read-only iterator
-            TestHelper.assertFalse (true);
+            Assert.assertFalse (true);
         } catch (Exception e) {
             
         }
         try {
             it.remove ();
             // It should have generated an exception, because it is a read-only iterator
-            TestHelper.assertFalse (true);
+            Assert.assertFalse (true);
         } catch (Exception e) {
             
         }
@@ -90,18 +91,18 @@ public class TestReadOnlyAndUpdatableIterators {
             it.next().setValue (0);
         } catch (Exception e) {
             // It should not have generated an exception, because it is a non read-only iterator
-            TestHelper.assertFalse (true);            
+            Assert.assertFalse (true);
         }
         
         try {
             it.remove ();
         } catch (Exception e) {
             // It should not have generated an exception, because it is a non read-only iterator
-            TestHelper.assertFalse (true);            
+            Assert.assertFalse (true);
         }
         
         // All changes are done on the original map
-        TestHelper.assertEquals (MAP_SIZE - 1, bt.size ());            
+        Assert.assertEquals (MAP_SIZE - 1, bt.size ());
     }
 
     @Test
@@ -112,19 +113,19 @@ public class TestReadOnlyAndUpdatableIterators {
             it.next().setValue (0);
         } catch (Exception e) {
             // It should not have generated an exception, because it is a non read-only iterator
-            TestHelper.assertFalse (true);            
+            Assert.assertFalse (true);
         }
         try {
             it.remove ();
         } catch (Exception e) {
             // It should not have generated an exception, because it is a non read-only iterator
-            TestHelper.assertFalse (true);            
+            Assert.assertFalse (true);
         }
 
         // All changes are done on the snapshot, not on the original map
         // Map size should remain unchanged
-        TestHelper.assertEquals (MAP_SIZE, bt.size ());
+        Assert.assertEquals (MAP_SIZE, bt.size ());
         // snapshot size was changed
-        TestHelper.assertEquals (MAP_SIZE-1, snapshot.size ());            
+        Assert.assertEquals (MAP_SIZE-1, snapshot.size ());
     }
 }

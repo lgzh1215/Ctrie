@@ -1,5 +1,6 @@
 package org.lpj.some.collection;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 
@@ -9,9 +10,9 @@ public class TestDelete {
         final TrieMap<Object, Object> bt = new TrieMap<Object, Object>();
 
         for (int i = 0; i < 10000; i++) {
-            TestHelper.assertEquals(null, bt.put(i, i));
+            Assert.assertEquals (null, bt.put(i, i));
             final Object lookup = bt.get(i);
-            TestHelper.assertEquals(i, lookup);
+            Assert.assertEquals (i, lookup);
         }
 
         checkAddInsert(bt, 536);
@@ -20,9 +21,9 @@ public class TestDelete {
 
         for (int i = 0; i < 10000; i++) {
             boolean removed = null != bt.remove(i);
-            TestHelper.assertEquals(Boolean.TRUE, removed);
+            Assert.assertEquals (Boolean.TRUE, removed);
             final Object lookup = bt.get(i);
-            TestHelper.assertEquals(null, lookup);
+            Assert.assertEquals (null, lookup);
         }
 
         bt.toString();
@@ -32,12 +33,12 @@ public class TestDelete {
         final Integer v = k;
         bt.remove(v);
         Object foundV = bt.get(v);
-        TestHelper.assertEquals(null, foundV);
-        TestHelper.assertEquals(null, bt.put(v, v));
+        Assert.assertEquals (null, foundV);
+        Assert.assertEquals (null, bt.put(v, v));
         foundV = bt.get(v);
-        TestHelper.assertEquals(v, foundV);
+        Assert.assertEquals (v, foundV);
 
-        TestHelper.assertEquals(v, bt.put(v, -1));
-        TestHelper.assertEquals(-1, bt.put(v, v));
+        Assert.assertEquals (v, bt.put(v, -1));
+        Assert.assertEquals (-1, bt.put(v, v));
     }
 }

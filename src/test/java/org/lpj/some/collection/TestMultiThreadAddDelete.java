@@ -1,5 +1,6 @@
 package org.lpj.some.collection;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.Map;
@@ -39,10 +40,10 @@ public class TestMultiThreadAddDelete {
                     e.printStackTrace ();
                 }
             }
-            
-            TestHelper.assertEquals (COUNT, bt.size ());
-            TestHelper.assertFalse (bt.isEmpty ());
-            
+
+            Assert.assertEquals (COUNT, bt.size ());
+            Assert.assertFalse (bt.isEmpty ());
+
             {
                 final ExecutorService es = Executors.newFixedThreadPool (N_THREADS);
                 for (int i = 0; i < N_THREADS; i++) {
@@ -65,11 +66,11 @@ public class TestMultiThreadAddDelete {
                     e.printStackTrace ();
                 }
             }
-            
-            
-            TestHelper.assertEquals (0, bt.size ());
-            TestHelper.assertTrue (bt.isEmpty ());
-            
+
+
+            Assert.assertEquals (0, bt.size ());
+            Assert.assertTrue (bt.isEmpty ());
+
             {
                 final ExecutorService es = Executors.newFixedThreadPool (N_THREADS);
                 for (int i = 0; i < N_THREADS; i++) {
@@ -103,12 +104,12 @@ public class TestMultiThreadAddDelete {
                     e.printStackTrace ();
                 }
             }
-            
-            TestHelper.assertEquals (0, bt.size ());
+
+            Assert.assertEquals (0, bt.size ());
             if (!bt.isEmpty ()) {
                 System.out.println ();
             }
-            TestHelper.assertTrue (bt.isEmpty ());
+            Assert.assertTrue (bt.isEmpty ());
         }
     }
 }
