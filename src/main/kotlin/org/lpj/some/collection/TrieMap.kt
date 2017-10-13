@@ -325,7 +325,7 @@ class TrieMap<K : Any, V : Any> private constructor(@Volatile private var root: 
     }
 
     private class RDCSS_Descriptor<K : Any, V : Any>(var old: INode<K, V>, var expectedMain: MainNode<K, V>, var new: INode<K, V>) : Root<K, V> {
-        @Volatile internal var committed = false
+        @Volatile var committed = false
     }
 
     private fun CAS_ROOT(ov: Root<K, V>, nv: Root<K, V>): Boolean {
@@ -643,19 +643,19 @@ class TrieMap<K : Any, V : Any> private constructor(@Volatile private var root: 
         }
     }
 
-    internal tailrec fun lookup(key: K, hash: Int): V? {
+    private tailrec fun lookup(key: K, hash: Int): V? {
         val root = RDCSS_READ_ROOT()
         val res = root.recLookup(key, hash, 0, null, root.gen)
         return if (res !== RESTART) res as V? else lookup(key, hash)
     }
 
-    internal tailrec fun insert(key: K, value: V, hash: Int, cond: Any?): V? {
+    private tailrec fun insert(key: K, value: V, hash: Int, cond: Any?): V? {
         val root = RDCSS_READ_ROOT()
         val ret = root.recInsert(key, value, hash, cond, 0, null, root.gen)
         return if (ret !== RESTART) ret as V? else insert(key, value, hash, cond)
     }
 
-    internal tailrec fun delete(key: K, value: V?, hash: Int): V? {
+    private tailrec fun delete(key: K, value: V?, hash: Int): V? {
         val root = RDCSS_READ_ROOT()
         val res = root.recDelete(key, value, hash, 0, null, root.gen)
         return if (res !== RESTART) res as V? else delete(key, value, hash)
